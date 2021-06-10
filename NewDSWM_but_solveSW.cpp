@@ -96,17 +96,22 @@ double phi_0 = phi_ea + 1.0e-4;
 
 const double Hk = 2.0 * fabs(K1) / miu0 / Ms / Ms;
 
-constexpr double	Field_period = 10000.0;					// 1e5 picosec -> 1e-7 s		1e4 picosec -> 1e-8 s
+constexpr double	Field_period = 1.0e4;					// 1e5 picosec -> 1e-7 s		1e4 picosec -> 1e-8 s
 constexpr double	Freq_H = 1.0 / Field_period;			// 1e5 ps -> 1e7 Hz (10 MHz)	1e4 ps -> 1e8 Hz (100 MHz)
 constexpr int		nperiods = 1;
 constexpr double	t_max = nperiods * Field_period;
 
-constexpr double	Read_period = Field_period / 1000.0;	// 1e1 picosec -> 1e-11 s
+constexpr double	Read_period = Field_period / 100.0;	// 1e1 picosec -> 1e-11 s
 constexpr double	Freq_Read = 1.0 / Read_period;			// 1e1 ps -> 1e11 Hz (100 GHz)
+
+constexpr double	Read_avgs_per_step = 100;
+constexpr double	Read_period_for_avgs = Read_period / Read_avgs_per_step;
+constexpr double	Freq_avgs_read = 1.0 / Read_period_for_avgs;
 
 //vrem sa citim nperiods of Field_period cu Read_period
 constexpr int		nstep = nperiods * (int)(Field_period / Read_period);
-constexpr double	t_step = t_max / (nstep - 1);		// reading time step
+constexpr double	t_step      = t_max / (nstep - 1);				// reading time step
+constexpr double	t_step_read = t_step / Read_avgs_per_step;		// fine reading time step
 
 double T_Larmor = 1.0 / (gamma * 2.0 * fabs(K1) / (miu0 * Ms) / (2.0 * M_PI)) * 1.0e12;
 
@@ -131,7 +136,7 @@ static std::array<std::array<struct sCoef, n_max_vec>, npart> Position_Coef{};
 
 //******************************************************
 
-char save_file_2_SW[500] = "E:\\Stoleriu\\C\\special\\3d\\res\\2020\\SW---LLG\\Timing\\SW_time_Js1-K1e5_th20_100MHz-MHL.dat";
+char save_file_2_SW[500] = "E:\\Stoleriu\\C\\special\\3d\\res\\2021\\DSWM\\SW_time_Js1-K1e5_th20_100MHz-MHL_avgs.dat";
 
 //const double FieldMax = +1193662.0 / Ms;
 //const double FieldMin = -1193662.0 / Ms;
@@ -143,7 +148,7 @@ const double FieldMin = -3.0 * Hk;
 
 int main()
 {
-	int i, j;
+	int i, j, k;
 
 	double       t = 0.0;
 	//double     tend = 2000.0;
@@ -255,21 +260,28 @@ int main()
 				y[2 * j + 1] = y_old[2 * j + 1];
 			}
 
-			timp_2D_3D(t_step, Hext.H, y_old, y_target, y);
+			Msys.Mx = 0.0; Msys.My = 0.0; Msys.Mz = 0.0;
+
+			for (k = 0; k < Read_avgs_per_step; k++)
+			{
+				timp_2D_3D(t_step_read*(k+1), Hext.H, y_old, y_target, y);
+
+
+				for (j = 0; j < npart; j++)
+				{
+					Medium[j].theta_sol = y[2 * j + 0];
+					Medium[j].phi_sol = y[2 * j + 1];
+					Msys.Mx += Medium[j].volume * sin(y[2 * j + 0]) * cos(y[2 * j + 1]);
+					Msys.My += Medium[j].volume * sin(y[2 * j + 0]) * sin(y[2 * j + 1]);
+					Msys.Mz += Medium[j].volume * cos(y[2 * j + 0]);
+				}
+			}
 			///////////////////////////////////////////////////////////////
 
-			Msys.Mx = 0.0; Msys.My = 0.0; Msys.Mz = 0.0;
-			for (j = 0; j < npart; j++)
-			{
-				Medium[j].theta_sol = y[2 * j + 0];
-				Medium[j].phi_sol = y[2 * j + 1];
-				Msys.Mx += Medium[j].volume * sin(y[2 * j + 0]) * cos(y[2 * j + 1]);
-				Msys.My += Medium[j].volume * sin(y[2 * j + 0]) * sin(y[2 * j + 1]);
-				Msys.Mz += Medium[j].volume * cos(y[2 * j + 0]);
-			}
-			Msys.Mx /= VolumTotal;
-			Msys.My /= VolumTotal;
-			Msys.Mz /= VolumTotal;
+
+			Msys.Mx /= (Read_avgs_per_step * VolumTotal);
+			Msys.My /= (Read_avgs_per_step * VolumTotal);
+			Msys.Mz /= (Read_avgs_per_step * VolumTotal);
 
 			MHL_projection = (Msys.Mx * sin(Hext.theta) * cos(Hext.phi) + Msys.My * sin(Hext.theta) * sin(Hext.phi) + Msys.Mz * cos(Hext.theta));
 
