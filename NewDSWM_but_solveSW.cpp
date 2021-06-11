@@ -17,15 +17,17 @@ using namespace std;
 typedef complex<double> doublec;
 
 #define npart 1
-#define neq (2*npart)
+#define neq (2 * npart)
 
 //#define nstep 1000
 
 constexpr int numRuns = 1;
 
 
-#define SW_DYN 1
-//#undef SW
+#define SW_MHL 1
+#undef SW_MHL
+#define SW_FORC 1
+//#undef SW_FORC
 
 
 constexpr int n_max_vec = 30;
@@ -102,15 +104,16 @@ constexpr int		nperiods = 1;
 constexpr double	t_max = nperiods * Field_period;
 
 constexpr double	Read_period = Field_period / 100.0;	// 1e1 picosec -> 1e-11 s
-constexpr double	Freq_Read = 1.0 / Read_period;			// 1e1 ps -> 1e11 Hz (100 GHz)
+constexpr double	Freq_Read = 1.0 / Read_period;		// 1e1 ps -> 1e11 Hz (100 GHz)
 
-constexpr double	Read_avgs_per_step = 100;
+constexpr double	Read_avgs_per_step = 30;
 constexpr double	Read_period_for_avgs = Read_period / Read_avgs_per_step;
 constexpr double	Freq_avgs_read = 1.0 / Read_period_for_avgs;
 
 //vrem sa citim nperiods of Field_period cu Read_period
 constexpr int		nstep = nperiods * (int)(Field_period / Read_period);
-constexpr double	t_step      = t_max / (nstep - 1);				// reading time step
+//constexpr double	t_step      = t_max / (nstep - 1);				// reading time step
+constexpr double	t_step = t_max / 2.0 / (nstep - 1);				// reading time step
 constexpr double	t_step_read = t_step / Read_avgs_per_step;		// fine reading time step
 
 double T_Larmor = 1.0 / (gamma * 2.0 * fabs(K1) / (miu0 * Ms) / (2.0 * M_PI)) * 1.0e12;
@@ -136,7 +139,7 @@ static std::array<std::array<struct sCoef, n_max_vec>, npart> Position_Coef{};
 
 //******************************************************
 
-char save_file_2_SW[500] = "E:\\Stoleriu\\C\\special\\3d\\res\\2021\\DSWM\\SW_time_Js1-K1e5_th20_100MHz-MHL_avgs.dat";
+char save_file_2_SW[500] = "E:\\Stoleriu\\C\\special\\3d\\res\\2021\\DSWM\\SW_time_Js1-K1e5_th20_100MHz-FORC_avgs50.dat";
 
 //const double FieldMax = +1193662.0 / Ms;
 //const double FieldMin = -1193662.0 / Ms;
@@ -160,7 +163,8 @@ int main()
 
 	for (i = 0; i < nstep; i++)
 	{
-		H[i].H = FieldMax * cos(i * nperiods * 2.0 * Pi / (nstep - 1));
+		//H[i].H = FieldMax * cos(i * nperiods * 2.0 * Pi / (nstep - 1));
+		H[i].H = FieldMax * cos(i * nperiods *       Pi / (nstep - 1));
 		H[i].theta = theta_h;
 		H[i].phi = phi_h;
 		H[i].Hx = H[i].H * sin(H[i].theta) * cos(H[i].phi);
@@ -194,7 +198,7 @@ int main()
 	//////////////////////////////////////////////////////////////////////////
 	// MHL SW
 	//////////////////////////////////////////////////////////////////////////
-#ifdef SW_DYN
+#ifdef SW_MHL
 	{
 		FILE *fp;
 
@@ -233,10 +237,6 @@ int main()
 		for (int h = 0; h < nstep; h++)
 		{
 			Hext = H[h];
-			if (H[h].H < 0.0)
-			{
-				printf("a");
-			}
 
 			for (j = 0; j < npart; j++)
 			{
@@ -289,6 +289,139 @@ int main()
 
 			fclose(fp);
 
+			printf("%07.4lf ps -> H = %07.4lf -> M = %07.4lf \n", t * time_norm * 1.0e12, Hext.H, MHL_projection);
+		}
+	}
+#endif
+
+	//////////////////////////////////////////////////////////////////////////
+	// MHL SW
+	//////////////////////////////////////////////////////////////////////////
+#ifdef SW_FORC
+	{
+		FILE *fp;
+
+		fp = fopen(save_file_2_SW, "w");
+		fclose(fp);
+
+		double ug_th = theta_h;
+		double ug_ph = phi_h;
+		double MHL_projection;
+
+		//initial conditions
+		//////////////////////////////////// SATURATE!
+		for (i = 0; i < npart; i++)
+		{
+			Medium[i].theta_sol = H[0].theta;
+			Medium[i].phi_sol = H[0].phi;
+			y[2 * i + 0] = Medium[i].theta_sol;
+			y[2 * i + 1] = Medium[i].phi_sol;
+			y_old[2 * i + 0] = y[2 * i + 0];
+			y_old[2 * i + 1] = y[2 * i + 1];
+		}
+
+		Hext = H[0];
+		for (j = 0; j < npart; j++)
+			SW_angle_single_full(j, &y[2 * j + 0], Medium[j], Hext);
+
+		for (j = 0; j < npart; j++)
+		{
+			Medium[j].theta_sol = y[2 * j + 0];
+			Medium[j].phi_sol = y[2 * j + 1];
+			y_old[2 * j + 0] = y[2 * j + 0];
+			y_old[2 * j + 1] = y[2 * j + 1];
+		}
+		/////////////////////////////////////////////////   MHL
+
+		for (int h = 0; h < nstep; h++)
+		{
+			Hext = H[h];
+
+			for (j = 0; j < npart; j++)
+			{
+				y[2 * j + 0] = Medium[j].theta_sol;
+				y[2 * j + 1] = Medium[j].phi_sol;
+				y_old[2 * j + 0] = y[2 * j + 0];
+				y_old[2 * j + 1] = y[2 * j + 1];
+			}
+
+			for (j = 0; j < npart; j++)
+				SW_angle_single_full(j, &y[2 * j + 0], Medium[j], Hext);
+
+			for (j = 0; j < npart; j++)
+			{
+				y_target[2 * j + 0] = y[2 * j + 0];
+				y_target[2 * j + 1] = y[2 * j + 1];
+				y[2 * j + 0] = y_old[2 * j + 0];
+				y[2 * j + 1] = y_old[2 * j + 1];
+			}
+
+			for (k = 0; k < Read_avgs_per_step; k++)
+			{
+				timp_2D_3D(t_step_read * (k + 1), Hext.H, y_old, y_target, y);
+			}
+			
+			for (j = 0; j < npart; j++)
+			{
+				Medium[j].theta_sol = y[2 * j + 0];
+				Medium[j].phi_sol = y[2 * j + 1];
+			}
+
+			///////////////////////////////////////////////////////////////  FORC
+
+			for (int hh = h; hh >= 0; hh--)
+			{
+				Hext = H[hh];
+
+				for (j = 0; j < npart; j++)
+				{
+					y[2 * j + 0] = Medium[j].theta_sol;
+					y[2 * j + 1] = Medium[j].phi_sol;
+					y_old[2 * j + 0] = y[2 * j + 0];
+					y_old[2 * j + 1] = y[2 * j + 1];
+				}
+
+				fp = fopen(save_file_2_SW, "a");
+
+				for (j = 0; j < npart; j++)
+					SW_angle_single_full(j, &y[2 * j + 0], Medium[j], Hext);
+
+				for (j = 0; j < npart; j++)
+				{
+					y_target[2 * j + 0] = y[2 * j + 0];
+					y_target[2 * j + 1] = y[2 * j + 1];
+					y[2 * j + 0] = y_old[2 * j + 0];
+					y[2 * j + 1] = y_old[2 * j + 1];
+				}
+
+				Msys.Mx = 0.0; Msys.My = 0.0; Msys.Mz = 0.0;
+
+				for (k = 0; k < Read_avgs_per_step; k++)
+				{
+					timp_2D_3D(t_step_read * (k + 1), Hext.H, y_old, y_target, y);
+
+					for (j = 0; j < npart; j++)
+					{
+						Medium[j].theta_sol = y[2 * j + 0];
+						Medium[j].phi_sol = y[2 * j + 1];
+						Msys.Mx += Medium[j].volume * sin(y[2 * j + 0]) * cos(y[2 * j + 1]);
+						Msys.My += Medium[j].volume * sin(y[2 * j + 0]) * sin(y[2 * j + 1]);
+						Msys.Mz += Medium[j].volume * cos(y[2 * j + 0]);
+					}
+
+				}
+				///////////////////////////////////////////////////////////////
+
+				Msys.Mx /= (Read_avgs_per_step * VolumTotal);
+				Msys.My /= (Read_avgs_per_step * VolumTotal);
+				Msys.Mz /= (Read_avgs_per_step * VolumTotal);
+
+				MHL_projection = (Msys.Mx * sin(Hext.theta) * cos(Hext.phi) + Msys.My * sin(Hext.theta) * sin(Hext.phi) + Msys.Mz * cos(Hext.theta));
+
+				fprintf(fp, "%20.16lf %20.16lf %20.16lf\n", H[h].H, Hext.H, MHL_projection);
+
+				fclose(fp);
+			}
 			printf("%07.4lf ps -> H = %07.4lf -> M = %07.4lf \n", t * time_norm * 1.0e12, Hext.H, MHL_projection);
 		}
 	}
