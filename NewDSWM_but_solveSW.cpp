@@ -17,18 +17,19 @@ using namespace std;
 
 typedef complex<double> doublec;
 
-#define npart 2
+#define npart 1
 #define neq (2 * npart)
 
 //#define nstep 1000
 
 constexpr int numRuns = 1;
 
-
+#define SW_SINGLE 1
+//#undef SW_SINGLE
 #define SW_MHL 1
 #undef SW_MHL
 #define SW_FORC 1
-//#undef SW_FORC
+#undef SW_FORC
 
 
 constexpr int n_max_vec = 30;
@@ -88,11 +89,11 @@ constexpr double K1 = 1.0e5;
 const double gamma = 2.210173e5;
 const double time_norm = (1.0 + alpha * alpha) / gamma / Ms;
 
-double theta_ea = 0.1 * M_PI / 180.0;
-double phi_ea = 0.1 * M_PI / 180.0;
+double theta_ea = 0.01 * M_PI / 180.0;
+double phi_ea = 0.01 * M_PI / 180.0;
 
-double theta_h = 20.0 * M_PI / 180.0;
-double phi_h = 0.1 * M_PI / 180.0;
+double theta_h = 0.001 * M_PI / 180.0;
+double phi_h = 0.001 * M_PI / 180.0;
 
 double theta_0 = theta_ea + 1.0e-4;
 double phi_0 = phi_ea + 1.0e-4;
@@ -110,7 +111,7 @@ const double Hk = 2.0 * fabs(K1) / miu0 / Ms / Ms;
 ///////////////////////////////////////////////////// Medium[i].k eliminat din T_Larmor!!!
 ///////////////////////////////////////////////////// </summary>
 
-char save_file_2_SW[500] = "E:\\Stoleriu\\C\\special\\3d\\res\\2021\\DSWM\\2xSW_time_Js1-K1e5_th20_20MHz-FORC_avgs50_INTd1.3.dat";
+char save_file_2_SW[500] = "E:\\Stoleriu\\C\\special\\3d\\res\\2021\\DSWM\\Single_traj.dat";
 
 double dist_between_layers = 1.3;
 
@@ -207,10 +208,10 @@ int main()
 	Medium[0].z = 0.0;
 	Medium[0].k = 1.0 /*+ 1.0e-1 * random_para(mt_prob)*/;
 
-	Medium[1].x = 0.0;
-	Medium[1].y = 0.0;
-	Medium[1].z = dist_between_layers;
-	Medium[1].k = 0.3 /*+ 1.0e-1 * random_para(mt_prob)*/;
+// 	Medium[1].x = 0.0;
+// 	Medium[1].y = 0.0;
+// 	Medium[1].z = dist_between_layers;
+// 	Medium[1].k = 0.3 /*+ 1.0e-1 * random_para(mt_prob)*/;
 // 
 // 	Medium[2].x = 3.0;
 // 	Medium[2].y = 0.0;
@@ -250,6 +251,107 @@ int main()
 
 	anisotropy_coef();
 	function_neighbours();
+
+//////////////////////////////////////////////////////////////////////////
+// SINGLE SW
+//////////////////////////////////////////////////////////////////////////
+#ifdef SW_SINGLE
+	{
+		FILE *fp;
+
+		fp = fopen(save_file_2_SW, "w");
+		fclose(fp);
+
+		double ug_th = theta_h;
+		double ug_ph = phi_h;
+		double MHL_projection;
+
+		//initial conditions
+		//////////////////////////////////// SATURATE!
+
+		Hext = H[0];
+		Hext.H = -2.0 * Hk;
+		Hext.Hx = Hext.H * sin(Hext.theta) * cos(Hext.phi);
+		Hext.Hy = Hext.H * sin(Hext.theta) * sin(Hext.phi);
+		Hext.Hz = Hext.H * cos(Hext.theta);
+
+		for (i = 0; i < npart; i++)
+		{
+			Medium[i].theta_sol = Hext.theta;
+			Medium[i].phi_sol = Hext.phi;
+			y[2 * i + 0] = Medium[i].theta_sol;
+			y[2 * i + 1] = Medium[i].phi_sol;
+			y_old[2 * i + 0] = y[2 * i + 0];
+			y_old[2 * i + 1] = y[2 * i + 1];
+		}
+
+		/////////////////////////////////////////////////
+
+		for (int h = 0; h < 1; h++)
+		{
+
+			for (j = 0; j < npart; j++)
+			{
+				y[2 * j + 0] = Medium[j].theta_sol;
+				y[2 * j + 1] = Medium[j].phi_sol;
+				y_old[2 * j + 0] = y[2 * j + 0];
+				y_old[2 * j + 1] = y[2 * j + 1];
+			}
+
+			fp = fopen(save_file_2_SW, "a");
+
+			for (j = 0; j < npart; j++)
+				SW_angle_single_full(j, &y[2 * j + 0], Medium[j], Hext);
+
+			/////////////////////////////////////////////////////////////
+
+			for (j = 0; j < npart; j++)
+			{
+				y_target[2 * j + 0] = y[2 * j + 0];
+				y_target[2 * j + 1] = y[2 * j + 1];
+				y[2 * j + 0] = y_old[2 * j + 0];
+				y[2 * j + 1] = y_old[2 * j + 1];
+			}
+
+			for (int pastimp = 0; pastimp < 500; pastimp++)
+			{
+				Msys.Mx = 0.0; Msys.My = 0.0; Msys.Mz = 0.0;
+
+				timp_2D_3D(t_step_read, Hext.H, y_old, y_target, y);
+				t += t_step_read;
+				for (j = 0; j < npart; j++)
+				{
+					y_old[2 * j + 0] = y[2 * j + 0];
+					y_old[2 * j + 1] = y[2 * j + 1];
+				}
+
+				for (j = 0; j < npart; j++)
+				{
+					Medium[j].theta_sol = y[2 * j + 0];
+					Medium[j].phi_sol = y[2 * j + 1];
+					Msys.Mx += Medium[j].volume * sin(y[2 * j + 0]) * cos(y[2 * j + 1]);
+					Msys.My += Medium[j].volume * sin(y[2 * j + 0]) * sin(y[2 * j + 1]);
+					Msys.Mz += Medium[j].volume * cos(y[2 * j + 0]);
+				}
+				///////////////////////////////////////////////////////////////
+
+				Msys.Mx /= VolumTotal;
+				Msys.My /= VolumTotal;
+				Msys.Mz /= VolumTotal;
+
+				MHL_projection = (Msys.Mx * sin(Hext.theta) * cos(Hext.phi) + Msys.My * sin(Hext.theta) * sin(Hext.phi) + Msys.Mz * cos(Hext.theta));
+
+				fprintf(fp, "%20.16lf %20.16lf %20.16lf %20.16lf %20.16lf %20.16lf %20.16lf %20.16lf %20.16lf\n", t * time_norm * 1.0e12, Hext.Hx, Hext.Hy, Hext.Hz, Msys.Mx, Msys.My, Msys.Mz, Hext.H, MHL_projection);
+
+				printf("%07.4lf ps -> H = %07.4lf -> M = %07.4lf \n", t * time_norm * 1.0e12, Hext.H, MHL_projection);
+			}
+
+			fclose(fp);
+		}
+	}
+#endif
+
+
 
 	//////////////////////////////////////////////////////////////////////////
 	// MHL SW
